@@ -70,12 +70,17 @@ head(subset %>% group_by(EVTYPE) %>% summarise(crop_damage=sum(CROPDMG)) %>% arr
 - An informative plot is to see the economic impact by state and visually check if there are any regions more affected than others.
 
 ```{r,echo=TRUE,warning=FALSE,message=FALSE,cache=TRUE}
+coords <- geocode(impact_by_state$STATE)
+```
+
+```{r,echo=TRUE,warning=FALSE,message=FALSE}
 library(ggmap)
 
 map <- get_map(location="united states", zoom=4, maptype="terrain", source="google", color="color")
-plot_data <- impact_by_state %>% mutate(longitude=geocode(STATE)$lon, latitude=geocode(STATE)$lat)
+plot_data <- cbind(impact_by_state, coords)
+
 ggmap(map) + 
-  geom_point(aes(x=longitude, y=latitude, show_guide=TRUE, color=total_impact), data=plot_data, alpha=.8, size=10) +
+  geom_point(aes(x=lon, y=lat, show_guide=TRUE, color=total_impact), data=plot_data, alpha=.8, size=10) +
 	scale_color_gradient(low="blue", high="red")
 ```
 
@@ -84,25 +89,23 @@ ggmap(map) +
 - We check what are the top 10 event types by number of fatalities and injuries caused across the whole country. We list first the number of fatalities.
 
 ```{r,echo=TRUE,warning=FALSE,message=FALSE,cache=TRUE}
-impact_by_event <- subset %>% group_by(EVTYPE)
-impact <- impact_by_event %>% summarise(fatalities=sum(FATALITIES), injuries=sum(INJURIES))
-head(impact %>% arrange(desc(fatalities)), 10)
-head(impact %>% arrange(desc(injuries)), 10)
+impact_by_event <- subset %>% group_by(EVTYPE) %>% summarise(fatalities=sum(FATALITIES), injuries=sum(INJURIES))
+head(impact_by_event %>% arrange(desc(fatalities)), 10)
+head(impact_by_event %>% arrange(desc(injuries)), 10)
 ```
 
 - We check now what are the most affected states in terms of human losses.
 
 ```{r,echo=TRUE,warning=FALSE,message=FALSE,cache=TRUE}
-impact_by_state <- subset %>% group_by(STATE)
-impact <- impact_by_state %>% summarise(fatalities=sum(FATALITIES), injuries=sum(INJURIES))
-head(impact %>% arrange(desc(fatalities)), 10)
-head(impact %>% arrange(desc(injuries)), 10)
+impact_by_state <- subset %>% group_by(STATE) %>% summarise(fatalities=sum(FATALITIES), injuries=sum(INJURIES))
+head(impact_by_state %>% arrange(desc(fatalities)), 10)
+head(impact_by_state %>% arrange(desc(injuries)), 10)
 ```
 
 - Another interesting thing to do would be to take the most affected 3 states by fatalities and check what types of disasters caused the losses
 
 ```{r,echo=TRUE,warning=FALSE,message=FALSE,cache=TRUE}
-states <- head(impact %>% arrange(desc(fatalities)), 3)$STATE
+states <- head(impact_by_state %>% arrange(desc(fatalities)), 3)$STATE
 top3_by_event <- subset %>% filter(STATE %in% states) %>% group_by(EVTYPE)
 impact <- top3_by_event %>% summarise(fatalities=sum(FATALITIES), injuries=sum(INJURIES))
 head(impact %>% arrange(desc(fatalities)), 3)
@@ -112,24 +115,29 @@ head(impact %>% arrange(desc(injuries)), 3)
 - We are plotting the number of life losses by state
 
 ```{r,echo=TRUE,warning=FALSE,message=FALSE}
-map <- get_map(location="united states", zoom=4, maptype="terrain", source="google", color="color")
-plot_data <- impact_by_state %>% mutate(longitude=geocode(STATE)$lon, latitude=geocode(STATE)$lat)
+library(ggmap)
+
+plot_data <- cbind(impact_by_state, coords)
+
 ggmap(map) + 
-  geom_point(aes(x=longitude, y=latitude, show_guide=TRUE, color=fatalities), data=plot_data, alpha=.8, size=10) +
+  geom_point(aes(x=lon, y=lat, show_guide=TRUE, color=fatalities), data=plot_data, alpha=.8, size=10) +
   scale_color_gradient(low="blue", high="red")
 ```
 
 - It would be interesting to see if there is any relation (as we expect) between the economic and health impact of the events.
 
 ```{r,echo=TRUE,warning=FALSE,message=FALSE,cache=TRUE}
-impact <- impact_by_event %>% summarise(fatalities=sum(FATALITIES), economic_losses=sum(PROPDMG+CROPDMG))
+library(dplyr)
+
+impact <- subset %>% group_by(EVTYPE) %>% summarise(fatalities=sum(FATALITIES), economic_losses=sum(PROPDMG+CROPDMG))
 cor(impact$fatalities, impact$economic_losses)
 ```
 
 - we will also make a plot with the economic and life losses by event type, side by side, filtering only the top 10 most harmful events for both type of losses and merging them together. Economic losses are scaled to show millions of dollars.
 
-```{r,echo=TRUE,warning=FALSE,message=FALSE,cache=TRUE}
+```{r,echo=TRUE,warning=FALSE,message=FALSE}
 library(reshape)
+library(dplyr)
 
 top_fatalities <- impact %>%
   mutate(economic_losses=economic_losses/1000000) %>% 
