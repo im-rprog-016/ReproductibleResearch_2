@@ -1,0 +1,159 @@
+---
+title: What Events Should We Be Afraid Of? A Brief Analysis of National Weather Service
+  Storm Data
+output: html_document
+date: "Saturday, January 17, 2015"
+---
+
+# Synopsis
+We analysed the NOAA Storm Database in order to find the most damaging weather events. We found that Hurricane/Typhoons are by far the most extreme events, leading to the biggest economic losses, followed at great distance by tornados and floods. In exchange, tornados, while causing only around half of the losses a hurricane does, is the major hazard for humans, taking the biggest toll in lives and injuries. The second weather event causing loss of life is heat, followed at distance by floods. The most affected states economically are Florida, Alabama and Texas while human impact is biggest in Illinois, Texas and Pennsylvania.
+
+# Data Processing
+
+Starting from the NOAA Storm Database available at https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf (and documented at https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf), we extract the csv file and filter out only the relevant columns from it: the event type, time and location information (BGN_DATE, END_DATE, COUNTYNAME, STATE, EVTYPE), the population health related columns (FATALITIES, INJURIES) and the economic metrics (columns PROPDMG, PROPDMGEXP, CROPDMG, CROPDMGEXP).
+Once we did that, we apply some transformations on the data in order to get the damage metrics in the same unit of measurement. According to the dataset documentation, alphabetical characters were used to signify magnitude "K" for thousands, "M" for millions, and "B" for billions).
+
+- First step is to download and extract the data
+
+```{r,echo=TRUE,warning=FALSE,message=FALSE,cache=TRUE}
+download.file("http://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2", "NOAA_StormData.csv.bz2")
+data <- read.table(bzfile("NOAA_StormData.csv.bz2"), header=TRUE, sep=",", stringsAsFactors=FALSE, allowEscapes=TRUE)
+```
+
+- Once we have a table with all the data, we are filtering out the data we are not interested in. We keep only the columns we find interesting and we apply some transformations to transform the economic impact metrics in the same unit of measurement (USD).
+
+```{r,echo=TRUE,warning=FALSE,message=FALSE,cache=TRUE}
+library(dplyr)
+
+subset <- data %>% select(BGN_DATE, END_DATE, COUNTYNAME, STATE, EVTYPE, FATALITIES, INJURIES, PROPDMG, PROPDMGEXP, CROPDMG, CROPDMGEXP) %>% mutate(CROPDMG=ifelse(CROPDMGEXP=="K", 1000, ifelse(CROPDMGEXP=="M", 10^6, ifelse(CROPDMGEXP=="B", 10^9, 1))), PROPDMG=ifelse(PROPDMGEXP=="K", 1000, ifelse(PROPDMGEXP=="M", 10^6, ifelse(PROPDMGEXP=="B", 10^9, 1))), PROPDMGEXP=NULL, CROPDMGEXP=NULL)
+```
+
+- We will be using the whole dataset, so we are interested what is the timespan covered by it
+
+```{r,echo=TRUE,warning=FALSE,message=FALSE,cache=TRUE}
+min(data$BGN_DATE)
+max(data$END_DATE)
+```
+
+## Economic impact
+
+- Based on this data, we check what are the top 10 event types that are the most harmful in terms of economic impact (looking both at properties and crops damage cuantifications) across the whole country. 
+We could analyse the crops and property damage separately, since we expect that some extreme events will overshadow others when adding up (since property damage should be bigger than crops damage), but for the sake of finding the most "costly" events, summing is ok, since both are expressed in USD.
+
+```{r,echo=TRUE,warning=FALSE,message=FALSE,cache=TRUE}
+impact_by_event <- subset %>% mutate(impact=PROPDMG+CROPDMG) %>% group_by(EVTYPE) %>% summarise(total_impact=sum(impact))
+sorted_impact <- impact_by_event %>% arrange(desc(total_impact))
+head(sorted_impact, 10)
+```
+
+- It is interesting to see how much do the first 3 ranking events account from the total losses
+```{r,echo=TRUE,warning=FALSE,message=FALSE,cache=TRUE}
+top3_impact <- top_n(sorted_impact, 3)
+sum(top3_impact$total_impact) / sum(sorted_impact$total_impact)
+```
+
+- We also check what are the most affected states in terms of economic losses.
+
+```{r,echo=TRUE,warning=FALSE,message=FALSE,cache=TRUE}
+impact_by_state <- subset %>% mutate(impact=PROPDMG+CROPDMG) %>% group_by(STATE) %>% summarise(total_impact=sum(impact))
+state_sorted_impact <- impact_by_state %>% arrange(desc(total_impact))
+head(state_sorted_impact, 10)
+```
+
+- In order to check however the different impact on crops and properties (which we expect to be bigger), we list the top 3 events causing problems for each.
+
+```{r,echo=TRUE,warning=FALSE,message=FALSE,cache=TRUE}
+head(subset %>% group_by(EVTYPE) %>% summarise(property_damage=sum(PROPDMG)) %>% arrange(desc(property_damage)), 3)
+head(subset %>% group_by(EVTYPE) %>% summarise(crop_damage=sum(CROPDMG)) %>% arrange(desc(crop_damage)), 3)
+```
+
+- An informative plot is to see the economic impact by state and visually check if there are any regions more affected than others.
+
+```{r,echo=TRUE,warning=FALSE,message=FALSE,cache=TRUE}
+library(ggmap)
+
+map <- get_map(location="united states", zoom=4, maptype="terrain", source="google", color="color")
+plot_data <- impact_by_state %>% mutate(longitude=geocode(STATE)$lon, latitude=geocode(STATE)$lat)
+ggmap(map) + 
+  geom_point(aes(x=longitude, y=latitude, show_guide=TRUE, color=total_impact), data=plot_data, alpha=.8, size=10) +
+	scale_color_gradient(low="blue", high="red")
+```
+
+## Health impact
+
+- We check what are the top 10 event types by number of fatalities and injuries caused across the whole country. We list first the number of fatalities.
+
+```{r,echo=TRUE,warning=FALSE,message=FALSE,cache=TRUE}
+impact_by_event <- subset %>% group_by(EVTYPE)
+impact <- impact_by_event %>% summarise(fatalities=sum(FATALITIES), injuries=sum(INJURIES))
+head(impact %>% arrange(desc(fatalities)), 10)
+head(impact %>% arrange(desc(injuries)), 10)
+```
+
+- We check now what are the most affected states in terms of human losses.
+
+```{r,echo=TRUE,warning=FALSE,message=FALSE,cache=TRUE}
+impact_by_state <- subset %>% group_by(STATE)
+impact <- impact_by_state %>% summarise(fatalities=sum(FATALITIES), injuries=sum(INJURIES))
+head(impact %>% arrange(desc(fatalities)), 10)
+head(impact %>% arrange(desc(injuries)), 10)
+```
+
+- Another interesting thing to do would be to take the most affected 3 states by fatalities and check what types of disasters caused the losses
+
+```{r,echo=TRUE,warning=FALSE,message=FALSE,cache=TRUE}
+states <- head(impact %>% arrange(desc(fatalities)), 3)$STATE
+top3_by_event <- subset %>% filter(STATE %in% states) %>% group_by(EVTYPE)
+impact <- top3_by_event %>% summarise(fatalities=sum(FATALITIES), injuries=sum(INJURIES))
+head(impact %>% arrange(desc(fatalities)), 3)
+head(impact %>% arrange(desc(injuries)), 3)
+```
+
+- We are plotting the number of life losses by state
+
+```{r,echo=TRUE,warning=FALSE,message=FALSE}
+map <- get_map(location="united states", zoom=4, maptype="terrain", source="google", color="color")
+plot_data <- impact_by_state %>% mutate(longitude=geocode(STATE)$lon, latitude=geocode(STATE)$lat)
+ggmap(map) + 
+  geom_point(aes(x=longitude, y=latitude, show_guide=TRUE, color=fatalities), data=plot_data, alpha=.8, size=10) +
+  scale_color_gradient(low="blue", high="red")
+```
+
+- It would be interesting to see if there is any relation (as we expect) between the economic and health impact of the events.
+
+```{r,echo=TRUE,warning=FALSE,message=FALSE,cache=TRUE}
+impact <- impact_by_event %>% summarise(fatalities=sum(FATALITIES), economic_losses=sum(PROPDMG+CROPDMG))
+cor(impact$fatalities, impact$economic_losses)
+```
+
+- we will also make a plot with the economic and life losses by event type, side by side, filtering only the top 10 most harmful events for both type of losses and merging them together. Economic losses are scaled to show millions of dollars.
+
+```{r,echo=TRUE,warning=FALSE,message=FALSE,cache=TRUE}
+library(reshape)
+
+top_fatalities <- impact %>%
+  mutate(economic_losses=economic_losses/1000000) %>% 
+  arrange(desc(fatalities)) %>% 
+  head(10)
+top_economic_losses <- impact %>% 
+  mutate(economic_losses=economic_losses/1000000) %>%
+  arrange(desc(economic_losses)) %>% 
+  head(10)
+plot_data <- merge(top_fatalities, top_economic_losses, all=TRUE) %>%
+  arrange(desc(fatalities))
+
+barplot(t(data.frame(plot_data$fatalities, plot_data$economic_losses)), horiz=TRUE, names.arg=plot_data$EVTYPE, las=1, cex.names=0.5, beside=TRUE, legend=c("Fatalities", "Economic losses"), col=c("red", "orange"))
+```
+
+# Results
+
+Based on the results we have, we conclude that hurricane, typhoons and floods are the most "expensive" weather events, together accounting for almost half of the losses due to extraordinary weather events, so it is recommended to allocate resources in monitoring and early warning programs, so we are not caught unprepared. Also, some infrastructure works can be done in order to minimize the losses in case these events happen.
+We see also that property damage is bigger than crop damage. And while other weather events causing losses in agriculture should not be ignored (drought and freeze), dealing with the events causing property damage should go first.
+
+Based on the state by state analysis, we conclude that the states which are more affected by disasters and which need prioritary attention are Florida, Alabama and Texas.
+
+In terms of life and health hazards, tornados are by far the main event taking lives (5633), followed by heat (excessive heat and heat together account for 2840) and floods (almost 1000). Injuries are mainly caused by tornados (90K), followed by strong winds, floods and heat, all around affecting around 6500 people.
+
+The states which are most affected by human life losses are Illinois, Texas and Pennsylvania and for injuries Texas, Missouriand Alabama.
+
+Given the numbers, the government should take action and implement prevention and early warning programs for the mentioned types of events and allocate resources prioritary for the mentioned states. The states with high number of injuries should especially get attention so that educational programs for the population are made, teaching people what actions are recommended on specific extreme weather events.
